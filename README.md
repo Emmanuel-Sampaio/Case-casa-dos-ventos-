@@ -155,9 +155,11 @@ A fato `fato_geracao_spe` tem granularidade **SPE × semi-hora** (30 min), que �
 
 ### Junção SPE ↔ Conjunto
 
-Os dois datasets do ONS não compartilham uma chave explícita. O `id_ons` tem domínios disjuntos (SPE vs. conjunto). A estratégia de join adotada usa o **prefixo numérico do CEG** (os 6 dígitos antes do hífen) como chave de ligação: SPEs e conjuntos que compartilham o mesmo empreendimento físico possuem o mesmo prefixo CEG. O join é LEFT JOIN do detail para usinas, com `din_referencia` como condição temporal. Linhas sem correspondência (SPE sem restrição ativa) ficam com `sk_conjunto = NULL` na fato — isso é esperado e documentado nos logs.
+Os dois datasets do ONS não compartilham uma chave explícita confiável. Anteriormente, o campo `ceg` poderia ser usado, mas no formato atual dos dados abertos do ONS, a coluna `ceg` do dataset de usinas vem preenchida com hífens (`-`). 
 
-Antes do join, o dataset de usinas é filtrado via `stg_usinas_cdv` para manter apenas conjuntos cujo prefixo CEG coincide com alguma SPE da Casa dos Ventos, evitando matches espúrios com conjuntos de outras empresas.
+A estratégia de join atualizada e robusta utiliza o **nome do conjunto/usina** (`nom_conjunto_spe` no dataset detail e `nom_conjunto` no dataset usinas). O join é um LEFT JOIN do detail para usinas, cruzando o nome padronizado (caixa alta) e o `din_referencia` (condição temporal). Linhas sem correspondência (SPE sem restrição ativa ou sem correspondência de conjunto) ficam com `sk_conjunto = NULL` na fato — o que é esperado e rastreado nos logs (ex: 100% de match de conjuntos válidos).
+
+Antes do join, o dataset de usinas é filtrado via `stg_usinas_cdv` para manter apenas os conjuntos cujo nome existe na base filtrada de SPEs da Casa dos Ventos (`stg_detail_cdv`), evitando cruzar e carregar na Fato conjuntos pertencentes a outras empresas.
 
 ### Decisões de Design
 
@@ -185,7 +187,7 @@ Alternativa com **Airflow**: uma DAG mensal com tasks `extract >> load >> transf
 
 ## Premissas
 
-1. Os CSVs do ONS seguem o padrão `<PREFIXO>_<AAAA-MM>.csv` com separador `;` e encoding `latin-1`.
-2. O link SPE ↔ Conjunto é feito pelo prefixo numérico do CEG (6 dígitos antes do hífen), já que não há chave explícita entre os datasets.
+1. Os CSVs do ONS seguem o padrão `<PREFIXO>_<AAAA_MM>.csv` com separador `;` e encodings dinâmicos (tentativa em `utf-8`, fallback em `latin-1`).
+2. O link SPE ↔ Conjunto é feito logicamente através do nome (`nom_conjuntousina` <=> `nom_usina`), dado que a chave `ceg` encontra-se corrompida/vazia no dataset aberto de usinas fornecido pelo ONS.
 3. Registros com `flg_dadoInvalido = 1` têm a velocidade do vento anulada, mas são mantidos na fato para preservar o histórico de disponibilidade e geração.
 4. "MWh restringidos" é calculado como `(geracaoEstimada - geracaoVerificada) × 0.5h` — proxy da energia que deixou de ser gerada por restrição.
