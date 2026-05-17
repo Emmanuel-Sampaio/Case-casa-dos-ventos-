@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Data and logs
+data/raw/*
+data/processed/*
+data/parquet/*
+data/warehouse.duckdb
+logs/*
+!data/spes_casa_dos_ventos.csv
