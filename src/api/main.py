@@ -5,7 +5,7 @@ FastAPI servindo os dados processados do warehouse DuckDB.
 import os
 from pathlib import Path
 from datetime import date
-from typing import Optional
+from typing import Optional, Generator
 
 import duckdb
 from fastapi import FastAPI, HTTPException, Query, Depends
@@ -17,14 +17,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DB_PATH = Path(os.getenv("DB_PATH", str(PROJECT_ROOT / "data" / "warehouse.duckdb")))
 
 
-def get_conn() -> duckdb.DuckDBPyConnection:
-    """Abre uma conexão read-only ao DuckDB (thread-safe para FastAPI)."""
+def get_conn() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+    """Abre uma conexão read-only ao DuckDB e garante seu fechamento."""
     if not DB_PATH.exists():
         raise HTTPException(
             status_code=503,
             detail=f"Warehouse não encontrado em {DB_PATH}. Execute o pipeline primeiro."
         )
-    return duckdb.connect(str(DB_PATH), read_only=True)
+    conn = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 
@@ -82,11 +86,10 @@ def health_check():
 
 
 @app.get("/projects", response_model=list[ProjectMetadata], tags=["Projetos"])
-def list_projects():
+def list_projects(conn: duckdb.DuckDBPyConnection = Depends(get_conn)):
     """
     Lista todos os projetos disponíveis com metadados básicos.
     """
-    conn = get_conn()
     try:
         rows = conn.execute("""
             SELECT
@@ -103,8 +106,6 @@ def list_projects():
         """).fetchall()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao consultar projetos: {exc}")
-    finally:
-        conn.close()
 
     subsistema_map = {
         "BA": "Nordeste", "CE": "Nordeste", "PI": "Nordeste", "RN": "Nordeste",
@@ -136,19 +137,17 @@ def get_generation(
     ),
     data_inicio: Optional[date] = Query(None, description="Data início (YYYY-MM-DD)"),
     data_fim: Optional[date] = Query(None, description="Data fim (YYYY-MM-DD)"),
+    conn: duckdb.DuckDBPyConnection = Depends(get_conn),
 ):
     """
     Retorna dados de geração agregados de um projeto.
     As métricas são somadas sobre todas as SPEs do projeto.
     """
-    conn = get_conn()
-
     # Valida projeto
     exists = conn.execute(
         "SELECT 1 FROM dim_spe WHERE projeto = ? LIMIT 1", [project_id]
     ).fetchone()
     if not exists:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"Projeto '{project_id}' não encontrado.")
 
     period_expr = (
@@ -186,8 +185,6 @@ def get_generation(
         """, params).fetchall()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        conn.close()
 
     return [
         GenerationPoint(
@@ -210,13 +207,12 @@ def get_restrictions_summary(
     projeto: Optional[str] = Query(None, description="Filtrar por projeto"),
     data_inicio: Optional[date] = Query(None),
     data_fim: Optional[date] = Query(None),
+    conn: duckdb.DuckDBPyConnection = Depends(get_conn),
 ):
     """
     Resumo de constrained-off: total de horas e MWh restringidos,
     agrupados por razão de restrição.
     """
-    conn = get_conn()
-
     filters = ["r.cod_razaorestricao != 'SEM_REST'"]
     params: list = []
 
@@ -254,8 +250,6 @@ def get_restrictions_summary(
         """, params).fetchall()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        conn.close()
 
     return [
         RestrictionSummaryItem(
