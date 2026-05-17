@@ -1,6 +1,5 @@
 """
 Configurações centrais do pipeline.
-Carregadas de variáveis de ambiente com fallback para defaults sensatos.
 """
 
 import os
@@ -9,15 +8,13 @@ from dataclasses import dataclass, field
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Padrão descoberto explorando o bucket S3 público do ONS:
-#   https://s3.sa-east-1.amazonaws.com/public-prd-oni/ons-dl/dados/<dataset>/<arquivo>
-# Onde <arquivo> segue o padrão: <prefixo>_<AAAA-MM>.csv
-ONS_S3_BASE = "https://s3.sa-east-1.amazonaws.com/public-prd-oni/ons-dl/dados"
+# S3 ONS Public Bucket
+ONS_S3_BASE = "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset"
 
-DATASET_USINAS = "restricao_coff_eolica_usi"          # granularidade: conjunto
-DATASET_DETAIL = "restricao_coff_eolica_detail"        # granularidade: SPE
+DATASET_USINAS = "restricao_coff_eolica_tm"
+DATASET_DETAIL = "restricao_coff_eolica_detail_tm"
 
-FILE_PREFIX_USINAS = "RESTRICAO_COFF_EOLICA_USI"
+FILE_PREFIX_USINAS = "RESTRICAO_COFF_EOLICA"
 FILE_PREFIX_DETAIL = "RESTRICAO_COFF_EOLICA_DETAIL"
 
 

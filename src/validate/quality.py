@@ -22,21 +22,21 @@ EXPECTED_SCHEMA_RAW_DETAIL = {
     "id_ons": "VARCHAR",
     "nom_usina": "VARCHAR",
     "ceg": "VARCHAR",
-    "din_referencia": "TIMESTAMP",
-    "val_velocidadeVento": "DOUBLE",
-    "flg_dadoInvalido": "INTEGER",
-    "val_geracaoEstimada": "DOUBLE",
-    "val_geracaoVerificada": "DOUBLE",
+    "din_instante": "TIMESTAMP",
+    "val_ventoverificado": "DOUBLE",
+    "flg_dadoventoinvalido": "INTEGER",
+    "val_geracaoestimada": "DOUBLE",
+    "val_geracaoverificada": "DOUBLE",
 }
 
 EXPECTED_SCHEMA_RAW_USINAS = {
     "id_ons": "VARCHAR",
     "nom_usina": "VARCHAR",
     "ceg": "VARCHAR",
-    "din_referencia": "TIMESTAMP",
+    "din_instante": "TIMESTAMP",
     "val_geracao": "DOUBLE",
-    "val_geracaoLimitada": "DOUBLE",
-    "val_geracaoReferencia": "DOUBLE",
+    "val_geracaolimitada": "DOUBLE",
+    "val_geracaoreferencia": "DOUBLE",
     "cod_razaorestricao": "VARCHAR",
 }
 
@@ -153,8 +153,8 @@ def check_nulls(conn: duckdb.DuckDBPyConnection, report: QualityReport) -> None:
 def check_duplicates(conn: duckdb.DuckDBPyConnection, report: QualityReport) -> None:
     """Conta duplicatas exatas (ceg + din_referencia) em cada tabela."""
     for table, key in [
-        ("raw_detail", "ceg, din_referencia"),
-        ("raw_usinas", "ceg, din_referencia"),
+        ("raw_detail", "ceg, din_instante"),
+        ("raw_usinas", "nom_usina, din_instante"),
     ]:
         total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         distinct = conn.execute(
@@ -173,28 +173,28 @@ def check_business_rules(conn: duckdb.DuckDBPyConnection, report: QualityReport)
     rules = {
         "geracao_negativa_spe": """
             SELECT COUNT(*) FROM raw_detail
-            WHERE val_geracaoVerificada < 0 OR val_geracaoEstimada < 0
+            WHERE val_geracaoverificada < 0 OR val_geracaoestimada < 0
         """,
         "geracao_negativa_conjunto": """
             SELECT COUNT(*) FROM raw_usinas
-            WHERE val_geracao < 0 OR val_geracaoLimitada < 0
+            WHERE val_geracao < 0 OR val_geracaolimitada < 0
         """,
         "vento_fora_faixa": """
             SELECT COUNT(*) FROM raw_detail
-            WHERE val_velocidadeVento IS NOT NULL
-              AND (val_velocidadeVento < 0 OR val_velocidadeVento > 40)
+            WHERE val_ventoverificado IS NOT NULL
+              AND (val_ventoverificado < 0 OR val_ventoverificado > 40)
         """,
         "limitada_maior_referencia": """
             SELECT COUNT(*) FROM raw_usinas
-            WHERE val_geracaoLimitada IS NOT NULL
-              AND val_geracaoReferencia IS NOT NULL
-              AND val_geracaoLimitada > val_geracaoReferencia * 1.01  -- tolerância 1%
+            WHERE val_geracaolimitada IS NOT NULL
+              AND val_geracaoreferencia IS NOT NULL
+              AND val_geracaolimitada > val_geracaoreferencia * 1.01  -- tolerância 1%
         """,
         "dado_invalido_com_geracao": """
             SELECT COUNT(*) FROM raw_detail
-            WHERE flg_dadoInvalido = 1
-              AND val_geracaoVerificada IS NOT NULL
-              AND val_geracaoVerificada > 0
+            WHERE flg_dadoventoinvalido = 1
+              AND val_geracaoverificada IS NOT NULL
+              AND val_geracaoverificada > 0
         """,
     }
     for rule, sql in rules.items():
@@ -215,9 +215,9 @@ def check_timestamp_continuity(
     query = r"""
     SELECT
         s.projeto,
-        MIN(d.din_referencia)    AS ts_min,
-        MAX(d.din_referencia)    AS ts_max,
-        COUNT(DISTINCT d.din_referencia) AS ts_count
+        MIN(d.din_instante)    AS ts_min,
+        MAX(d.din_instante)    AS ts_max,
+        COUNT(DISTINCT d.din_instante) AS ts_count
     FROM raw_detail d
     JOIN ref_spes s ON regexp_extract(d.ceg, '(\d{6}-\d)', 1) = s.ceg
     GROUP BY s.projeto

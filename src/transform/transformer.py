@@ -17,34 +17,24 @@ logger = get_logger(__name__)
 SQL_STAGING_DETAIL = r"""
 CREATE OR REPLACE VIEW stg_detail AS
 SELECT
-    -- Extrai núcleo do CEG: segmento NNNNN-D do código completo
-    -- Ex: 'EOL.CV.BA.037102-5.01' → '037102-5'
     regexp_extract(ceg, '(\d{6}-\d)', 1)   AS ceg_nucleo,
     id_ons,
     nom_usina,
+    nom_conjuntousina                       AS nom_conjunto_spe,
     ceg                                     AS ceg_completo,
-    CAST(din_referencia AS TIMESTAMP)       AS din_referencia,
+    CAST(din_instante AS TIMESTAMP)         AS din_referencia,
 
-    -- Descarta linhas com flag de dado inválido
-    CASE WHEN flg_dadoInvalido = 1 THEN NULL
-         ELSE val_velocidadeVento END       AS val_velocidadeVento,
+    CASE WHEN flg_dadoventoinvalido = 1 THEN NULL
+         ELSE val_ventoverificado END       AS val_velocidadeVento,
 
-    flg_dadoInvalido,
-    val_geracaoEstimada,
-    val_geracaoVerificada,
+    flg_dadoventoinvalido                   AS flg_dadoInvalido,
+    val_geracaoestimada                     AS val_geracaoEstimada,
+    val_geracaoverificada                   AS val_geracaoVerificada,
     _year_month,
     _source_file
 FROM raw_detail
-WHERE
-    -- Remove duplicatas exatas
-    (ceg, din_referencia, _year_month) IN (
-        SELECT ceg, din_referencia, _year_month
-        FROM raw_detail
-        GROUP BY ceg, din_referencia, _year_month
-        HAVING COUNT(*) >= 1
-    )
 QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY ceg, din_referencia
+    PARTITION BY ceg, din_instante
     ORDER BY _source_file DESC
 ) = 1;
 """
@@ -52,30 +42,29 @@ QUALIFY ROW_NUMBER() OVER (
 SQL_STAGING_USINAS = r"""
 CREATE OR REPLACE VIEW stg_usinas AS
 SELECT
-    -- Extrai núcleo do CEG do conjunto (mesmo padrão)
     regexp_extract(ceg, '(\d{6}-\d)', 1)   AS ceg_nucleo,
     id_ons                                  AS id_ons_conjunto,
     nom_usina                               AS nom_conjunto,
     ceg                                     AS ceg_completo_conjunto,
-    CAST(din_referencia AS TIMESTAMP)       AS din_referencia,
+    CAST(din_instante AS TIMESTAMP)         AS din_referencia,
     val_geracao,
-    val_geracaoLimitada,
+    val_geracaolimitada                     AS val_geracaoLimitada,
     val_disponibilidade,
-    val_geracaoReferencia,
+    val_geracaoreferencia                   AS val_geracaoReferencia,
     COALESCE(cod_razaorestricao, 'SEM_REST') AS cod_razaorestricao,
-    COALESCE(nom_razaorestricao, 'Sem Restrição') AS nom_razaorestricao,
+    COALESCE(dsc_restricao, 'Sem Restricao') AS nom_razaorestricao,
     COALESCE(cod_origemrestricao, 'N/A')    AS cod_origemrestricao,
-    COALESCE(nom_origemrestricao, 'N/A')    AS nom_origemrestricao,
+    'N/A'                                   AS nom_origemrestricao,
     _year_month,
     _source_file
 FROM raw_usinas
 QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY ceg, din_referencia
+    PARTITION BY nom_usina, din_instante
     ORDER BY _source_file DESC
 ) = 1;
 """
 
-# FILTRO CASA DOS VENTOS
+# Filtro Casa dos Ventos
 
 SQL_SPES_TABLE = """
 CREATE TABLE IF NOT EXISTS ref_spes (
@@ -95,14 +84,14 @@ FROM stg_detail d
 INNER JOIN ref_spes s ON d.ceg_nucleo = s.ceg;
 """
 
-# Filtra o dataset de usinas para manter apenas conjuntos CdV
+# Filtra o dataset de usinas para manter apenas conjuntos Casa dos Ventos
 SQL_FILTERED_USINAS = r"""
 CREATE OR REPLACE VIEW stg_usinas_cdv AS
 SELECT DISTINCT u.*
 FROM stg_usinas u
 WHERE EXISTS (
-    SELECT 1 FROM ref_spes s
-    WHERE SPLIT_PART(s.ceg, '-', 1) = SPLIT_PART(u.ceg_nucleo, '-', 1)
+    SELECT 1 FROM stg_detail_cdv d
+    WHERE UPPER(d.nom_conjunto_spe) = UPPER(u.nom_conjunto)
 );
 """
 
@@ -113,6 +102,7 @@ SELECT
     d.ceg_completo,
     d.id_ons                                AS id_ons_spe,
     d.nom_usina                             AS nom_spe,
+    d.nom_conjunto_spe,
     d.spe,
     d.projeto,
     d.din_referencia,
@@ -137,18 +127,18 @@ SELECT
 FROM stg_detail_cdv d
 LEFT JOIN stg_usinas_cdv u
     ON  u.din_referencia = d.din_referencia
-    AND SPLIT_PART(d.ceg_nucleo, '-', 1) = SPLIT_PART(u.ceg_nucleo, '-', 1)
+    AND UPPER(d.nom_conjunto_spe) = UPPER(u.nom_conjunto)
 QUALIFY ROW_NUMBER() OVER (
     PARTITION BY d.ceg_completo, d.din_referencia
     ORDER BY u.id_ons_conjunto NULLS LAST
 ) = 1;
 """
 
-# STAR SCHEMA — DDL
+# Star Schema DDL
 
 DDL_DIM_TEMPO = """
 CREATE TABLE IF NOT EXISTS dim_tempo (
-    sk_tempo        INTEGER PRIMARY KEY,   -- surrogate key: YYYYMMDDHHMM
+    sk_tempo        BIGINT PRIMARY KEY,    -- YYYYMMDDHHMM
     din_referencia  TIMESTAMP NOT NULL,
     dat_data        DATE,
     ano             INTEGER,
@@ -199,7 +189,7 @@ CREATE TABLE IF NOT EXISTS dim_restricao (
 DDL_FATO = """
 CREATE TABLE IF NOT EXISTS fato_geracao_spe (
     -- Chaves surrogate
-    sk_tempo            INTEGER NOT NULL REFERENCES dim_tempo(sk_tempo),
+    sk_tempo            BIGINT NOT NULL REFERENCES dim_tempo(sk_tempo),
     sk_spe              INTEGER NOT NULL REFERENCES dim_spe(sk_spe),
     sk_conjunto         INTEGER REFERENCES dim_conjunto(sk_conjunto),   -- NULL se sem match
     sk_restricao        INTEGER REFERENCES dim_restricao(sk_restricao),
@@ -220,12 +210,12 @@ CREATE TABLE IF NOT EXISTS fato_geracao_spe (
 );
 """
 
-# POPULATE DIMENSIONS E FATO
+# Populate Dimensions and Fact
 
 SQL_POP_DIM_TEMPO = """
 INSERT OR IGNORE INTO dim_tempo
 SELECT
-    CAST(strftime(din_referencia, '%Y%m%d%H%M') AS INTEGER) AS sk_tempo,
+    CAST(strftime(din_referencia, '%Y%m%d%H%M') AS BIGINT) AS sk_tempo,
     din_referencia,
     CAST(din_referencia AS DATE)            AS dat_data,
     YEAR(din_referencia)                    AS ano,
@@ -312,12 +302,12 @@ WHERE j.din_referencia IS NOT NULL
 """
 
 
-# INTERFACE PÚBLICA
+# Interface Pública
 
 def load_spes_reference(conn: duckdb.DuckDBPyConnection, spes_csv: Path) -> None:
     """Carrega o arquivo de referência das SPEs Casa dos Ventos."""
     conn.execute(SQL_SPES_TABLE)
-    conn.execute("DELETE FROM ref_spes")  # idempotência
+    conn.execute("DELETE FROM ref_spes")
     conn.execute(f"""
         INSERT INTO ref_spes
         SELECT projeto, spe, ceg
@@ -345,12 +335,12 @@ def run_transform(conn: duckdb.DuckDBPyConnection, config: PipelineConfig) -> No
     conn.execute(SQL_FILTERED_USINAS)
     conn.execute(SQL_JOINED)
 
-    # 3. Relatório de join (documenta perdas)
+    # 3. Relatório de join
     total_spe = conn.execute("SELECT COUNT(*) FROM stg_detail_cdv").fetchone()[0]
     matched   = conn.execute("SELECT COUNT(*) FROM stg_joined WHERE id_ons_conjunto IS NOT NULL").fetchone()[0]
     unmatched = total_spe - matched
     logger.info(
-        "JOIN SPE↔Conjunto: %d/%d com correspondência (%.1f%%) | %d sem match (NULL conjunto)",
+        "JOIN SPE<->Conjunto: %d/%d com correspondencia (%.1f%%) | %d sem match (NULL conjunto)",
         matched, total_spe,
         100 * matched / total_spe if total_spe else 0,
         unmatched,
@@ -366,7 +356,7 @@ def run_transform(conn: duckdb.DuckDBPyConnection, config: PipelineConfig) -> No
     for ddl in [DDL_DIM_TEMPO, DDL_DIM_SPE, DDL_DIM_CONJUNTO, DDL_DIM_RESTRICAO, DDL_FATO]:
         conn.execute(ddl)
 
-    # 5. Popula dimensões (INSERT OR IGNORE garante idempotência)
+    # 5. Popula dimensões
     logger.info("Populando dimensões…")
     conn.execute(SQL_POP_DIM_TEMPO)
     conn.execute(SQL_POP_DIM_SPE)
@@ -380,7 +370,7 @@ def run_transform(conn: duckdb.DuckDBPyConnection, config: PipelineConfig) -> No
     fato_rows = conn.execute("SELECT COUNT(*) FROM fato_geracao_spe").fetchone()[0]
     logger.info("Transform concluído. fato_geracao_spe: %d linhas", fato_rows)
 
-    # 7. Exporta para Parquet particionado por projeto e ano_mes
+    # 7. Exporta para Parquet
     _export_parquet(conn, config.parquet_dir)
 
 
@@ -392,7 +382,7 @@ def _export_parquet(conn: duckdb.DuckDBPyConnection, parquet_dir: Path) -> None:
     logger.info("Exportando para Parquet em %s…", parquet_dir)
     parquet_dir.mkdir(parents=True, exist_ok=True)
 
-    # Fato principal — particionada
+    # Fato principal
     conn.execute(f"""
         COPY (
             SELECT
@@ -408,7 +398,7 @@ def _export_parquet(conn: duckdb.DuckDBPyConnection, parquet_dir: Path) -> None:
         (FORMAT PARQUET, PARTITION_BY (projeto, ano_mes), OVERWRITE_OR_IGNORE TRUE)
     """)
 
-    # Dimensões — arquivos planos
+    # Dimensões
     for dim in ["dim_tempo", "dim_spe", "dim_conjunto", "dim_restricao"]:
         conn.execute(f"""
             COPY {dim}

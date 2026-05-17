@@ -33,7 +33,7 @@ def test_month_range_cross_year():
 
 def test_build_url():
     url = _build_url(DATASET_USINAS, FILE_PREFIX_USINAS, "2025-10")
-    assert "2025-10" in url
+    assert "2025_10" in url
     assert DATASET_USINAS in url
     assert url.startswith("https://")
 
@@ -62,7 +62,7 @@ def in_memory_db():
         SELECT
             'MAEDT1', 'MORRO ESTREITO 1', 'EOL.CV.BA.037102-5.01',
             TIMESTAMP '2025-10-01 00:30:00',
-            -1.0,   -- vento negativo → violação de regra de negócio
+            -1.0,   -- vento negativo violacao de regra de negocio
             1,      -- dado inválido
             5.0, 0.0,
             '2025-10', 'test_file.csv'
@@ -103,7 +103,7 @@ def in_memory_db():
 
 def test_ceg_nucleo_extraction(in_memory_db):
     """Testa extração do núcleo do CEG via regex."""
-    result = in_memory_db.execute("""
+    result = in_memory_db.execute(r"""
         SELECT regexp_extract('EOL.CV.BA.037102-5.01', '(\d{6}-\d)', 1)
     """).fetchone()[0]
     assert result == "037102-5"

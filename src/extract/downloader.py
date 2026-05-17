@@ -1,10 +1,6 @@
 """
-Responsável por baixar os arquivos CSV mensais dos dois datasets ONS
-de um bucket S3 público, com retry, fallback e idempotência.
-
-URL pattern descoberto explorando o portal dados.ons.org.br:
-  https://s3.sa-east-1.amazonaws.com/public-prd-oni/ons-dl/dados/
-    <dataset>/<PREFIXO>_<AAAA-MM>.csv
+Responsável por baixar os arquivos CSV mensais dos datasets ONS
+do S3 público, com retry e idempotência.
 """
 
 import time
@@ -46,7 +42,8 @@ def _month_range(start_ym: str, end_ym: str) -> list[str]:
 
 def _build_url(dataset: str, prefix: str, year_month: str) -> str:
     """Constrói a URL S3 para um arquivo mensal."""
-    filename = f"{prefix}_{year_month}.csv"
+    ym_underscore = year_month.replace("-", "_")
+    filename = f"{prefix}_{ym_underscore}.csv"
     return f"{ONS_S3_BASE}/{dataset}/{filename}"
 
 
@@ -120,7 +117,8 @@ def extract_dataset(
 
     for ym in months:
         url  = _build_url(dataset, prefix, ym)
-        dest = dataset_dir / f"{prefix}_{ym}.csv"
+        ym_underscore = ym.replace("-", "_")
+        dest = dataset_dir / f"{prefix}_{ym_underscore}.csv"
 
         try:
             ok = _download_file(
@@ -151,7 +149,7 @@ def run_extract(config: PipelineConfig) -> tuple[dict, dict]:
     Retorna (results_usinas, results_detail) — dicts {ym → Path|None}.
     """
     months = _month_range(config.start_year_month, config.end_year_month)
-    logger.info("Iniciando Extract para %d meses: %s → %s", len(months), months[0], months[-1])
+    logger.info("Iniciando Extract para %d meses: %s -> %s", len(months), months[0], months[-1])
 
     results_usinas = extract_dataset(
         dataset=DATASET_USINAS,

@@ -1,10 +1,6 @@
 """
-Responsável por ingerir os CSVs brutos baixados na etapa Extract
-para o DuckDB (raw layer), sem nenhuma transformação de negócio.
-
-Idempotência: antes de inserir cada arquivo, verifica se o par
-(dataset, year_month) já existe na tabela de controle.
-Se existir, pula a carga — re-executar o pipeline é seguro.
+Responsável por ingerir os CSVs brutos para o DuckDB (raw layer).
+Garante idempotência através da tabela de controle.
 """
 
 from pathlib import Path
@@ -21,41 +17,45 @@ logger = get_logger(__name__)
 
 DDL_RAW_USINAS = """
 CREATE TABLE IF NOT EXISTS raw_usinas (
-    -- controle de carga
     _source_file  VARCHAR,
     _year_month   VARCHAR,
 
-    -- campos originais ONS (dataset 1 — granularidade conjunto/complexo)
-    id_ons              VARCHAR,
+    id_subsistema       VARCHAR,
+    nom_subsistema      VARCHAR,
+    id_estado           VARCHAR,
+    nom_estado          VARCHAR,
     nom_usina           VARCHAR,
+    id_ons              VARCHAR,
     ceg                 VARCHAR,
-    din_referencia      TIMESTAMP,
+    din_instante        TIMESTAMP,
     val_geracao         DOUBLE,
-    val_geracaoLimitada DOUBLE,
+    val_geracaolimitada DOUBLE,
     val_disponibilidade DOUBLE,
-    val_geracaoReferencia DOUBLE,
+    val_geracaoreferencia DOUBLE,
+    val_geracaoreferenciafinal DOUBLE,
     cod_razaorestricao  VARCHAR,
-    nom_razaorestricao  VARCHAR,
     cod_origemrestricao VARCHAR,
-    nom_origemrestricao VARCHAR
+    dsc_restricao       VARCHAR
 );
 """
 
 DDL_RAW_DETAIL = """
 CREATE TABLE IF NOT EXISTS raw_detail (
-    -- controle de carga
     _source_file  VARCHAR,
     _year_month   VARCHAR,
 
-    -- campos originais ONS (dataset 2 — granularidade SPE)
-    id_ons              VARCHAR,
-    nom_usina           VARCHAR,
-    ceg                 VARCHAR,
-    din_referencia      TIMESTAMP,
-    val_velocidadeVento DOUBLE,
-    flg_dadoInvalido    INTEGER,
-    val_geracaoEstimada DOUBLE,
-    val_geracaoVerificada DOUBLE
+    id_subsistema           VARCHAR,
+    id_estado               VARCHAR,
+    nom_modalidadeoperacao  VARCHAR,
+    nom_conjuntousina       VARCHAR,
+    nom_usina               VARCHAR,
+    id_ons                  VARCHAR,
+    ceg                     VARCHAR,
+    din_instante            TIMESTAMP,
+    val_ventoverificado     DOUBLE,
+    flg_dadoventoinvalido   INTEGER,
+    val_geracaoestimada     DOUBLE,
+    val_geracaoverificada   DOUBLE
 );
 """
 
@@ -82,20 +82,25 @@ def _is_already_loaded(conn: duckdb.DuckDBPyConnection, dataset: str, ym: str) -
 
 def _read_csv_safe(path: Path) -> pd.DataFrame | None:
     """
-    Lê CSV com encoding latin-1 (padrão ONS) e sep=';'.
-    Retorna None se falhar.
+    Lê CSV com encoding UTF-8 (conforme documentação ONS) e sep=';'.
+    Fallback para latin-1 se UTF-8 falhar.
     """
-    try:
-        df = pd.read_csv(
-            path,
-            sep=";",
-            encoding="latin-1",
-            low_memory=False,
-        )
-        return df
-    except Exception as exc:
-        logger.error("Falha ao ler CSV %s: %s", path.name, exc)
-        return None
+    for enc in ("utf-8", "latin-1"):
+        try:
+            df = pd.read_csv(
+                path,
+                sep=";",
+                encoding=enc,
+                low_memory=False,
+            )
+            return df
+        except UnicodeDecodeError:
+            continue
+        except Exception as exc:
+            logger.error("Falha ao ler CSV %s: %s", path.name, exc)
+            return None
+    logger.error("Falha ao ler CSV %s: encoding nao suportado", path.name)
+    return None
 
 
 def _normalize_columns(df: pd.DataFrame, expected_cols: list[str]) -> pd.DataFrame:
@@ -124,16 +129,18 @@ def _normalize_columns(df: pd.DataFrame, expected_cols: list[str]) -> pd.DataFra
 
 
 USINAS_COLS = [
-    "id_ons", "nom_usina", "ceg", "din_referencia",
-    "val_geracao", "val_geracaoLimitada", "val_disponibilidade",
-    "val_geracaoReferencia", "cod_razaorestricao", "nom_razaorestricao",
-    "cod_origemrestricao", "nom_origemrestricao",
+    "id_subsistema", "nom_subsistema", "id_estado", "nom_estado",
+    "nom_usina", "id_ons", "ceg", "din_instante",
+    "val_geracao", "val_geracaolimitada", "val_disponibilidade",
+    "val_geracaoreferencia", "val_geracaoreferenciafinal",
+    "cod_razaorestricao", "cod_origemrestricao", "dsc_restricao",
 ]
 
 DETAIL_COLS = [
-    "id_ons", "nom_usina", "ceg", "din_referencia",
-    "val_velocidadeVento", "flg_dadoInvalido",
-    "val_geracaoEstimada", "val_geracaoVerificada",
+    "id_subsistema", "id_estado", "nom_modalidadeoperacao", "nom_conjuntousina",
+    "nom_usina", "id_ons", "ceg", "din_instante",
+    "val_ventoverificado", "flg_dadoventoinvalido",
+    "val_geracaoestimada", "val_geracaoverificada",
 ]
 
 
@@ -155,9 +162,9 @@ def _load_file(
     df["_year_month"]  = ym
 
     # Parseia data de forma robusta
-    if "din_referencia" in df.columns:
-        df["din_referencia"] = pd.to_datetime(
-            df["din_referencia"], dayfirst=True, errors="coerce"
+    if "din_instante" in df.columns:
+        df["din_instante"] = pd.to_datetime(
+            df["din_instante"], dayfirst=True, errors="coerce"
         )
 
     # Seleciona apenas colunas relevantes
@@ -175,7 +182,7 @@ def _load_file(
         [dataset, ym, path.name, len(df)],
     )
 
-    logger.info("Carregado %s → %s: %d linhas", path.name, table, len(df))
+    logger.info("Carregado %s -> %s: %d linhas", path.name, table, len(df))
     return len(df)
 
 

@@ -1,13 +1,5 @@
 """
 FastAPI servindo os dados processados do warehouse DuckDB.
-
-Endpoints:
-  GET /health                    — health check
-  GET /projects                  — lista projetos disponíveis
-  GET /generation/{project_id}   — geração agregada de um projeto
-  GET /restrictions/summary      — resumo de restrições por razão
-
-Documentação automática: http://localhost:8000/docs
 """
 
 import os
@@ -37,11 +29,8 @@ def get_conn() -> duckdb.DuckDBPyConnection:
 
 
 app = FastAPI(
-    title="Casa dos Ventos — API de Geração Eólica",
-    description=(
-        "API REST para consulta de dados de geração e constrained-off "
-        "das SPEs da Casa dos Ventos, processados a partir dos dados públicos do ONS."
-    ),
+    title="Casa dos Ventos - API de Geracao Eolica",
+    description="API REST para consulta de dados de geracao e constrained-off das SPEs da Casa dos Ventos.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -96,7 +85,6 @@ def health_check():
 def list_projects():
     """
     Lista todos os projetos disponíveis com metadados básicos.
-    Um projeto agrupa um conjunto de SPEs da Casa dos Ventos.
     """
     conn = get_conn()
     try:
