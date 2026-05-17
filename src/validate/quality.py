@@ -248,15 +248,25 @@ def check_referential_integrity(
     """Verifica integridade referencial entre fato e dimensões."""
     try:
         checks = {
-            "fato→dim_tempo": """
+            "fato->dim_tempo": """
                 SELECT COUNT(*) FROM fato_geracao_spe f
                 LEFT JOIN dim_tempo t ON t.sk_tempo = f.sk_tempo
                 WHERE t.sk_tempo IS NULL
             """,
-            "fato→dim_spe": """
+            "fato->dim_spe": """
                 SELECT COUNT(*) FROM fato_geracao_spe f
                 LEFT JOIN dim_spe s ON s.sk_spe = f.sk_spe
                 WHERE s.sk_spe IS NULL
+            """,
+            "fato->dim_conjunto": """
+                SELECT COUNT(*) FROM fato_geracao_spe f
+                LEFT JOIN dim_conjunto c ON c.sk_conjunto = f.sk_conjunto
+                WHERE f.sk_conjunto IS NOT NULL AND c.sk_conjunto IS NULL
+            """,
+            "fato->dim_restricao": """
+                SELECT COUNT(*) FROM fato_geracao_spe f
+                LEFT JOIN dim_restricao r ON r.sk_restricao = f.sk_restricao
+                WHERE f.sk_restricao IS NOT NULL AND r.sk_restricao IS NULL
             """,
         }
         for check, sql in checks.items():

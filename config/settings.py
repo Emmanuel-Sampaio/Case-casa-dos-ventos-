@@ -6,7 +6,6 @@ Carregadas de variáveis de ambiente com fallback para defaults sensatos.
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

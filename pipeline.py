@@ -41,11 +41,11 @@ def parse_args() -> argparse.Namespace:
 
 def run_pipeline(config: PipelineConfig) -> None:
     logger = get_logger(__name__)
-    logger.info("━━━ Pipeline iniciado ━━━")
+    logger.info("Pipeline iniciado")
     logger.info("Período: %s → %s", config.start_year_month, config.end_year_month)
     logger.info("DB: %s", config.db_path)
 
-    # ── EXTRACT ────────────────────────────────────────────────────────────────
+    # EXTRACT
     args = parse_args()
 
     if not args.skip_extract:
@@ -69,19 +69,19 @@ def run_pipeline(config: PipelineConfig) -> None:
         results_usinas = {k: v if v.exists() else None for k, v in results_usinas.items()}
         results_detail = {k: v if v.exists() else None for k, v in results_detail.items()}
 
-    # ── LOAD ───────────────────────────────────────────────────────────────────
+    # LOAD
     logger.info("▶ Etapa 2/4: LOAD")
     conn = init_database(config.db_path)
     run_load(conn, results_usinas, results_detail)
 
-    # ── TRANSFORM ─────────────────────────────────────────────────────────────
+    # TRANSFORM
     if not args.skip_transform:
         logger.info("▶ Etapa 3/4: TRANSFORM")
         run_transform(conn, config)
     else:
         logger.info("⏭ Transform pulado")
 
-    # ── VALIDATE ──────────────────────────────────────────────────────────────
+    # VALIDATE
     if not args.skip_validate:
         logger.info("▶ Etapa 4/4: VALIDATE")
         report = run_quality_checks(conn, config)
@@ -91,7 +91,7 @@ def run_pipeline(config: PipelineConfig) -> None:
         logger.info("⏭ Validate pulado")
 
     conn.close()
-    logger.info("━━━ Pipeline concluído com sucesso ━━━")
+    logger.info("Pipeline concluído com sucesso")
 
 
 if __name__ == "__main__":

@@ -58,6 +58,8 @@ class HealthResponse(BaseModel):
 class ProjectMetadata(BaseModel):
     projeto: str
     n_spes: int
+    estado: Optional[str]
+    subsistema: Optional[str]
     primeira_data: Optional[str]
     ultima_data: Optional[str]
 
@@ -101,9 +103,10 @@ def list_projects():
         rows = conn.execute("""
             SELECT
                 s.projeto,
-                COUNT(DISTINCT s.sk_spe)            AS n_spes,
-                MIN(t.din_referencia)::VARCHAR        AS primeira_data,
-                MAX(t.din_referencia)::VARCHAR        AS ultima_data
+                COUNT(DISTINCT s.sk_spe)              AS n_spes,
+                MODE(SPLIT_PART(s.ceg_completo, '.', 3)) AS estado,
+                MIN(t.din_referencia)::VARCHAR          AS primeira_data,
+                MAX(t.din_referencia)::VARCHAR          AS ultima_data
             FROM fato_geracao_spe f
             JOIN dim_spe   s ON s.sk_spe   = f.sk_spe
             JOIN dim_tempo t ON t.sk_tempo = f.sk_tempo
@@ -115,8 +118,18 @@ def list_projects():
     finally:
         conn.close()
 
+    subsistema_map = {
+        "BA": "Nordeste", "CE": "Nordeste", "PI": "Nordeste", "RN": "Nordeste",
+        "PE": "Nordeste", "MA": "Nordeste", "PB": "Nordeste", "AL": "Nordeste",
+        "SE": "Nordeste", "RS": "Sul", "SC": "Sul", "PR": "Sul",
+    }
+
     return [
-        ProjectMetadata(projeto=r[0], n_spes=r[1], primeira_data=r[2], ultima_data=r[3])
+        ProjectMetadata(
+            projeto=r[0], n_spes=r[1], estado=r[2],
+            subsistema=subsistema_map.get(r[2], "Desconhecido"),
+            primeira_data=r[3], ultima_data=r[4],
+        )
         for r in rows
     ]
 

@@ -95,11 +95,20 @@ FROM stg_detail d
 INNER JOIN ref_spes s ON d.ceg_nucleo = s.ceg;
 """
 
-# IDENTIFICAÇÃO DA CHAVE SPE ↔ CONJUNTO
+# Filtra o dataset de usinas para manter apenas conjuntos CdV
+SQL_FILTERED_USINAS = r"""
+CREATE OR REPLACE VIEW stg_usinas_cdv AS
+SELECT DISTINCT u.*
+FROM stg_usinas u
+WHERE EXISTS (
+    SELECT 1 FROM ref_spes s
+    WHERE SPLIT_PART(s.ceg, '-', 1) = SPLIT_PART(u.ceg_nucleo, '-', 1)
+);
+"""
+
 SQL_JOINED = """
 CREATE OR REPLACE VIEW stg_joined AS
 SELECT
-    -- identificação SPE
     d.ceg_nucleo,
     d.ceg_completo,
     d.id_ons                                AS id_ons_spe,
@@ -108,17 +117,14 @@ SELECT
     d.projeto,
     d.din_referencia,
 
-    -- métricas SPE
     d.val_velocidadeVento,
     d.flg_dadoInvalido,
     d.val_geracaoEstimada,
     d.val_geracaoVerificada,
 
-    -- identificação conjunto (pode ser NULL se SPE não tem par no dataset usinas)
     u.id_ons_conjunto,
     u.nom_conjunto,
 
-    -- métricas conjunto (propagadas para todas as SPEs do conjunto no mesmo ts)
     u.val_geracao,
     u.val_geracaoLimitada,
     u.val_disponibilidade,
@@ -129,18 +135,13 @@ SELECT
     u.nom_origemrestricao
 
 FROM stg_detail_cdv d
-LEFT JOIN stg_usinas u
-    -- Join pela coluna de ligação entre SPE e conjunto:
-    -- Usa o nom_usina da SPE truncado ao prefixo do conjunto.
-    -- Ex: 'MORRO ESTREITO 1' (SPE) → conjunto 'CONJ. MORRO ESTREITO'
-    -- Fallback: join por prefixo de CEG (primeiros 6 dígitos do núcleo)
+LEFT JOIN stg_usinas_cdv u
     ON  u.din_referencia = d.din_referencia
-    AND (
-        -- Estratégia 1: nome do conjunto está contido no nome da SPE
-        d.nom_usina ILIKE '%' || SPLIT_PART(u.nom_conjunto, ' ', 1) || '%'
-        -- Estratégia 2: prefixo numérico do CEG coincide
-        OR SPLIT_PART(d.ceg_nucleo, '-', 1) = SPLIT_PART(u.ceg_nucleo, '-', 1)
-    );
+    AND SPLIT_PART(d.ceg_nucleo, '-', 1) = SPLIT_PART(u.ceg_nucleo, '-', 1)
+QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY d.ceg_completo, d.din_referencia
+    ORDER BY u.id_ons_conjunto NULLS LAST
+) = 1;
 """
 
 # STAR SCHEMA — DDL
@@ -341,6 +342,7 @@ def run_transform(conn: duckdb.DuckDBPyConnection, config: PipelineConfig) -> No
     conn.execute(SQL_STAGING_DETAIL)
     conn.execute(SQL_STAGING_USINAS)
     conn.execute(SQL_FILTERED_DETAIL)
+    conn.execute(SQL_FILTERED_USINAS)
     conn.execute(SQL_JOINED)
 
     # 3. Relatório de join (documenta perdas)
